@@ -52,3 +52,6 @@ CMakeLists.txt.user
 build/
 build/*
 build/**
+
+# Code workspace
+genfx.code-workspace
