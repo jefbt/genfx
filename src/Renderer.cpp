@@ -125,7 +125,10 @@ public:
             p.freqY = (PI * 2.0f * cycles) / totalFrames;
             p.phaseX = rng.uniform01() * PI * 2.0f;
             p.phaseY = rng.uniform01() * PI * 2.0f;
-            p.radius = rng.uniform01() * (ctx.width / 400.0f) + 1.0f;
+            // radius within UI-configured range
+            float rmin = std::min(ctx.sizeMin, ctx.sizeMax);
+            float rmax = std::max(ctx.sizeMin, ctx.sizeMax);
+            p.radius = rmin + rng.uniform01() * std::max(0.0f, rmax - rmin);
             // golden colors palette
             struct Col{uint8_t r,g,b;};
             static Col pal[] = {{255,196,0},{255,214,10},{255,170,51},{255,236,179}};
@@ -207,7 +210,11 @@ public:
             p.x = rng.uniform01() * ctx.width; p.y = rng.uniform01() * ctx.height;
             p.vx = ((rng.uniform01() - 0.5f) * ctx.width / 4.0f) / (duration * ctx.fps);
             p.vy = ((rng.randint(1,2)) * ctx.height / duration) / (float)ctx.fps;
-            p.radius = rng.uniform01() * 2.5f + 1.0f;
+            {
+                float rmin = std::min(ctx.sizeMin, ctx.sizeMax);
+                float rmax = std::max(ctx.sizeMin, ctx.sizeMax);
+                p.radius = rmin + rng.uniform01() * std::max(0.0f, rmax - rmin);
+            }
             p.opacity = rng.uniform01() * 0.5f + 0.3f;
             m_particles.push_back(p);
         }
@@ -238,7 +245,11 @@ public:
             p.x = rng.uniform01() * ctx.width; p.y = rng.uniform01() * ctx.height;
             p.vx = ((rng.uniform01() - 0.5f) * ctx.width / 2.0f) / (duration * ctx.fps);
             p.vy = ((rng.uniform01() - 0.5f) * ctx.height / 2.0f) / (duration * ctx.fps);
-            p.radius = rng.uniform01() * 2.0f + 1.0f;
+            {
+                float rmin = std::min(ctx.sizeMin, ctx.sizeMax);
+                float rmax = std::max(ctx.sizeMin, ctx.sizeMax);
+                p.radius = rmin + rng.uniform01() * std::max(0.0f, rmax - rmin);
+            }
             p.blinkOffset = rng.uniform01() * PI * 2.0f;
             int cycles = (rng.randint(1,2));
             p.blinkSpeed = (PI * 2.0f * cycles) / (duration * ctx.fps);
@@ -276,6 +287,14 @@ void Renderer::SetDuration(int sec) { m_ctx.duration = std::clamp(sec, 10, 20); 
 void Renderer::SetFPS(int fps) { m_ctx.fps = std::clamp(fps, 1, 120); }
 void Renderer::SetDensity(int density) { m_ctx.density = std::clamp(density, 1, 100); }
 void Renderer::SetSpeed(float s) { m_ctx.speed = std::clamp(s, 0.1f, 5.0f); }
+void Renderer::SetSizeMin(float px) {
+    m_ctx.sizeMin = std::clamp(px, 0.1f, 200.0f);
+    if (m_ctx.sizeMin > m_ctx.sizeMax) m_ctx.sizeMax = m_ctx.sizeMin;
+}
+void Renderer::SetSizeMax(float px) {
+    m_ctx.sizeMax = std::clamp(px, 0.1f, 200.0f);
+    if (m_ctx.sizeMax < m_ctx.sizeMin) m_ctx.sizeMin = m_ctx.sizeMax;
+}
 
 void Renderer::Setup() {
     if (m_effectName == "black-noise") m_effect = std::make_unique<EffectBlackNoise>();

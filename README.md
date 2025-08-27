@@ -1,6 +1,6 @@
 # GenFX - Looping Effects Exporter (wxWidgets + FFmpeg)
 
-App C++ com GUI (wxWidgets) que pré-visualiza efeitos com alpha e exporta 4 arquivos WebM VP9 com transparência, em loop suave (10–20s):
+App C++ com GUI (wxWidgets) que pré-visualiza efeitos com alpha e exporta 4 arquivos WebM VP8 com transparência, em loop suave (10–20s):
 
 - 1280x720
 - 720x1280
@@ -52,7 +52,7 @@ Todos foram adaptados para loop contínuo. Além de movimentações e fases cíc
 ## Uso
 - Escolha o efeito, duração (10–20s), FPS (24–60) e densidade.
 - A prévia mostra BGRA com alpha. O fundo da prévia é transparente (aparece como preto onde alpha=0).
-- Clique em "Exportar" e escolha a pasta. Serão criados 4 `.webm` (VP9 com `yuva420p`).
+- Clique em "Exportar" e escolha a pasta. Serão criados 4 `.webm` (VP8 com `yuva420p`).
 - Exportação faz crossfade no final para garantir loop suave.
 
 ## Detalhes técnicos
@@ -62,14 +62,15 @@ Todos foram adaptados para loop contínuo. Além de movimentações e fases cíc
 - CMake: `CMakeLists.txt`
 
 ### FFmpeg
-O encoder usa:
+O encoder usa VP8 com alfa:
 ```
 ffmpeg -f rawvideo -pix_fmt bgra -s WxH -r FPS -i - \
-  -an -c:v libvpx-vp9 -pix_fmt yuva420p -b:v 0 -crf 28 \
-  -deadline good -row-mt 1 -tile-columns 1 -tile-rows 1 -auto-alt-ref 0 out.webm
+  -an -c:v libvpx -pix_fmt yuva420p -b:v 0 -crf 22 -g 60 \
+  -deadline good -cpu-used 4 -auto-alt-ref 0 -metadata:s:v:0 alpha_mode=1 out.webm
 ```
 - A entrada é BGRA (stdin) e a saída `yuva420p` preserva alpha.
-- Ajuste `-crf` para qualidade/tamanho. `-auto-alt-ref 0` evita conflitos com alpha em algumas versões.
+- Ajuste `-crf` para qualidade/tamanho. `-auto-alt-ref 0` evita problemas em alguns decoders.
+- `alpha_mode=1` anuncia o canal alfa no contêiner WebM.
 
 ### Loop suave
 - Efeitos usam parâmetros cíclicos/warp modular. Na exportação, os últimos `1s` fazem blend com os primeiros `1s`.

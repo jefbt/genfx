@@ -13,6 +13,8 @@ struct EffectContext {
     float speed{1.0f}; // speed multiplier for motion/time
     int totalFrames() const { return duration * fps; }
     int density{50}; // generic slider 1..100
+    float sizeMin{1.0f}; // particle min radius (px)
+    float sizeMax{8.0f}; // particle max radius (px)
 };
 
 class Effect {
@@ -30,6 +32,8 @@ public:
     void SetFPS(int fps);
     void SetDensity(int density);
     void SetSpeed(float s);
+    void SetSizeMin(float px);
+    void SetSizeMax(float px);
 
     void Setup();
     void RenderNextFrame();

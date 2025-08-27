@@ -1,3 +1,5 @@
+cls
+
 @echo off
 setlocal ENABLEDELAYEDEXPANSION
 
@@ -54,8 +56,5 @@ if exist "%OUT_DIR%" (
 ) else (
   echo Pasta de saida nao encontrada: %OUT_DIR%
 )
-
-echo rode o comando abaixo para criar o instalador:
-echo cpack --config build\vs\CPackConfig.cmake -G NSIS
 
 endlocal

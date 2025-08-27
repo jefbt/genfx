@@ -11,6 +11,11 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 find_package(wxWidgets REQUIRED COMPONENTS core base)
 include(${wxWidgets_USE_FILE})
 
+# When linking statically via vcpkg, wxWidgets image handlers may require these
+find_package(PNG REQUIRED)
+find_package(ZLIB REQUIRED)
+find_package(WebP REQUIRED)
+
 # Sources
 file(GLOB GENFX_SOURCES CONFIGURE_DEPENDS
     src/*.cpp
@@ -35,7 +40,7 @@ endif()
 target_include_directories(genfx PRIVATE src)
 
 # Link wxWidgets
-target_link_libraries(genfx PRIVATE ${wxWidgets_LIBRARIES})
+target_link_libraries(genfx PRIVATE ${wxWidgets_LIBRARIES} PNG::PNG ZLIB::ZLIB WebP::webp WebP::webpdemux)
 
 # Optimize a bit in Release
 if (CMAKE_BUILD_TYPE STREQUAL "Release")

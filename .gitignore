@@ -55,3 +55,6 @@ build/**
 
 # Code workspace
 genfx.code-workspace
+
+# Build scripts
+build.bat

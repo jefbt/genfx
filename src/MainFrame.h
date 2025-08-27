@@ -6,6 +6,7 @@
 #include <wx/slider.h>
 #include <wx/timer.h>
 #include <wx/dcbuffer.h>
+#include <wx/checkbox.h>
 #include "Renderer.h"
 #include "Utils.h"
 
@@ -66,7 +67,8 @@ private:
         int oy = (sz.GetHeight() - dh) / 2;
         if (dw > 0 && dh > 0) {
             wxBitmap scaled = wxBitmap(bmp.ConvertToImage().Scale(dw, dh, wxIMAGE_QUALITY_HIGH));
-            dc.DrawBitmap(scaled, ox, oy, true);
+            // UseMask=false to ensure true alpha blending is used (mask is for 1-bit transparency)
+            dc.DrawBitmap(scaled, ox, oy, false);
         }
     }
     void OnSize(wxSizeEvent&) { Refresh(false); }
@@ -89,6 +91,7 @@ private:
     void OnDurationChanged(wxCommandEvent&);
     void OnSpeedChanged(wxCommandEvent&);
     void OnDensityChanged(wxCommandEvent&);
+    void OnSizeRangeChanged(wxCommandEvent&);
     void OnBgChanged(wxCommandEvent&);
     void RecreateRenderer();
 
@@ -97,8 +100,12 @@ private:
     wxSlider* m_durationSlider{nullptr};
     wxSlider* m_speedSlider{nullptr};
     wxSlider* m_densitySlider{nullptr};
+    wxSlider* m_sizeMinSlider{nullptr};
+    wxSlider* m_sizeMaxSlider{nullptr};
     wxRadioBox* m_bgRadio{nullptr};
+    wxChoice* m_codecChoice{nullptr};
     wxButton* m_exportBtn{nullptr};
+    wxCheckBox* m_saveLogs{nullptr};
 
     wxTimer m_timer;
     std::unique_ptr<Renderer> m_renderer;
