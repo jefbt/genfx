@@ -81,11 +81,13 @@ void MainFrame::BuildUI() {
     right->Add(new wxStaticText(this, wxID_ANY, "Effect"), 0, wxLEFT|wxRIGHT|wxTOP, 8);
     m_effectChoice = new wxChoice(this, wxID_ANY);
     m_effectChoice->Append("black-noise");
+    m_effectChoice->Append("white-noise");
     m_effectChoice->Append("golden-lights");
     m_effectChoice->Append("rain");
     m_effectChoice->Append("snow");
     m_effectChoice->Append("fireflies");
-    m_effectChoice->SetSelection(1);
+    // Keep default as "golden-lights" (now at index 2 after inserting white-noise)
+    m_effectChoice->SetSelection(2);
     m_effectChoice->Bind(wxEVT_CHOICE, &MainFrame::OnEffectChanged, this);
     right->Add(m_effectChoice, 0, wxEXPAND|wxALL, 8);
 

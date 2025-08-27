@@ -2,6 +2,7 @@
 #include <cstring>
 #include <algorithm>
 #include <random>
+#include <cmath>
 // MSVC may not define M_PI unless _USE_MATH_DEFINES is set before <cmath>.
 // Use our own constant to avoid that dependency.
 static constexpr float PI = 3.14159265358979323846f;
@@ -54,54 +55,246 @@ static inline void fillCircleBGRA(std::vector<uint8_t>& buf, int w, int h, float
     }
 }
 
+// Simple filled rectangle helper (axis-aligned)
+static inline void fillRectBGRA(std::vector<uint8_t>& buf, int w, int h, int x, int y, int rw, int rh,
+                                uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    int x0 = std::max(0, x);
+    int y0 = std::max(0, y);
+    int x1 = std::min(w, x + rw);
+    int y1 = std::min(h, y + rh);
+    for (int yy = y0; yy < y1; ++yy) {
+        for (int xx = x0; xx < x1; ++xx) {
+            putPixelBGRA(buf, w, h, xx, yy, r, g, b, a);
+        }
+    }
+}
+
+// Draw a thin line by sampling t along the segment. thickness in pixels (1 or 2 recommended)
+static inline void drawLineBGRA(std::vector<uint8_t>& buf, int w, int h,
+                                float x0, float y0, float x1, float y1,
+                                uint8_t r, uint8_t g, uint8_t b, uint8_t a,
+                                int thickness = 1) {
+    float dx = x1 - x0, dy = y1 - y0;
+    float len = std::sqrt(dx*dx + dy*dy);
+    int steps = (int)std::max(1.0f, len);
+    for (int i = 0; i <= steps; ++i) {
+        float t = (steps==0)?0.0f: (float)i / (float)steps;
+        float x = x0 + dx * t;
+        float y = y0 + dy * t;
+        int ix = (int)std::round(x);
+        int iy = (int)std::round(y);
+        for (int oy = -thickness/2; oy <= thickness/2; ++oy) {
+            for (int ox = -thickness/2; ox <= thickness/2; ++ox) {
+                putPixelBGRA(buf, w, h, ix + ox, iy + oy, r, g, b, a);
+            }
+        }
+    }
+}
+
+// Quadratic Bezier curve drawing using line segments
+static inline void drawQuadBezierBGRA(std::vector<uint8_t>& buf, int w, int h,
+                                      float x0, float y0, float cx, float cy, float x1, float y1,
+                                      uint8_t r, uint8_t g, uint8_t b, uint8_t a,
+                                      int thickness = 1, int segments = 32) {
+    float px = x0, py = y0;
+    for (int i=1; i<=segments; ++i) {
+        float t = (float)i / (float)segments;
+        float it = 1.0f - t;
+        float x = it*it*x0 + 2*it*t*cx + t*t*x1;
+        float y = it*it*y0 + 2*it*t*cy + t*t*y1;
+        drawLineBGRA(buf, w, h, px, py, x, y, r, g, b, a, thickness);
+        px = x; py = y;
+    }
+}
+
 // Base Effect class helpers
+// Film Dust and Scratches effect (replaces former Black Noise)
 class EffectBlackNoise : public Effect {
 public:
     void setup(const EffectContext& ctx) override {
-        m_gridSize = std::max(2, ctx.width / 80); // particle size
-        int cols = (ctx.width + m_gridSize-1) / m_gridSize;
-        int rows = (ctx.height + m_gridSize-1) / m_gridSize;
-        m_cells.resize(size_t(cols*rows));
-        RNG rng(12345u);
-        int tf = ctx.totalFrames();
-        for (auto& c : m_cells) {
-            c.nextChange = rng.randint(10, 60);
-            c.phase = rng.randint(0, tf-1);
-            c.value = (rng.uniform01() > 0.5) ? 255 : 0;
+        // Precompute vignette mask for performance
+        m_w = ctx.width; m_h = ctx.height;
+        m_vignette.resize(size_t(m_w * m_h), 0);
+        // Max vignette alpha reduced for extra subtlety and scaled slightly with density
+        // Previously ~[16..64]; now ~[8..32]
+        int maxA = std::clamp(12 + (ctx.density * 8 / 100), 8, 32);
+        float cx = (m_w - 1) * 0.5f;
+        float cy = (m_h - 1) * 0.5f;
+        float rx = cx;
+        float ry = cy;
+        for (int y=0; y<m_h; ++y) {
+            for (int x=0; x<m_w; ++x) {
+                float nx = (x - cx) / rx;
+                float ny = (y - cy) / ry;
+                float d = std::sqrt(nx*nx + ny*ny); // 0 at center, ~1 at corners
+                float t = std::clamp((d - 0.6f) / 0.4f, 0.0f, 1.0f); // start darkening after 60% radius
+                uint8_t a = (uint8_t)std::clamp(int(t * maxA), 0, 255);
+                m_vignette[size_t(y)*m_w + x] = a;
+            }
         }
+        m_seedBase = 77771u; // deterministic base
     }
+
     void drawBGRA(std::vector<uint8_t>& buf, int frame, const EffectContext& ctx) override {
-        // For seamless loop, derive state deterministically from frame modulo totalFrames
-        int tf = ctx.totalFrames();
-        int fInt = int(frame * ctx.speed) % std::max(1, tf);
-        int cols = (ctx.width + m_gridSize-1) / m_gridSize;
-        int rows = (ctx.height + m_gridSize-1) / m_gridSize;
-        for (int r=0; r<rows; ++r) {
-            for (int c=0; c<cols; ++c) {
-                size_t idx = size_t(r*cols + c);
-                auto& cell = m_cells[idx];
-                int f = (fInt + cell.phase) % tf;
-                // Toggle value every cell.nextChange frames, deterministic
-                int toggles = f / std::max(1, cell.nextChange);
-                uint8_t v = (toggles % 2 == 0) ? cell.value : (cell.value?0:255);
-                if (v > 0) {
-                    int x = c * m_gridSize;
-                    int y = r * m_gridSize;
-                    for (int yy=0; yy<m_gridSize && y+yy<ctx.height; ++yy) {
-                        for (int xx=0; xx<m_gridSize && x+xx<ctx.width; ++xx) {
-                            putPixelBGRA(buf, ctx.width, ctx.height, x+xx, y+yy, v, v, v, v);
-                        }
-                    }
+        int tf = std::max(1, ctx.totalFrames());
+        int f = int(frame * ctx.speed) % tf;
+        RNG rng(m_seedBase + (uint32_t)f);
+
+        // Global flicker computation kept minimal; vignette no longer flips to brighten
+        float flicker = float(rng.uniform01()*0.02 - 0.01); // smaller range
+        (void)flicker;
+
+        // Small jitter offset to all primitives
+        int jx = rng.randint(-1, 1);
+        int jy = rng.randint(-1, 1);
+
+        // 1) Vignette (always slight darken; more subtle than before)
+        for (int y=0; y<m_h; ++y) {
+            for (int x=0; x<m_w; ++x) {
+                uint8_t a = m_vignette[size_t(y)*m_w + x];
+                if (a) {
+                    // further attenuate vignette alpha for subtlety
+                    uint8_t a2 = (uint8_t)std::clamp(int(a * 0.6f), 0, 255);
+                    putPixelBGRA(buf, ctx.width, ctx.height, x, y, 0,0,0, a2);
                 }
             }
         }
-        m_frame = (m_frame+1) % tf;
+
+        // Helper lambdas for colors
+        auto randGray = [&](int minV, int maxV){ return (uint8_t)rng.randint(minV, maxV); };
+
+        // 2) Dust particles
+        int dustMin = 20;
+        int dustMax = 50;
+        int dustCount = std::clamp((ctx.density * (dustMin + dustMax) / 200), dustMin/2, dustMax*2);
+        for (int i=0; i<dustCount; ++i) {
+            int px = rng.randint(0, ctx.width-1) + jx;
+            int py = rng.randint(0, ctx.height-1) + jy;
+            int rw = rng.randint((int)std::max(1.0f, ctx.sizeMin), (int)std::max(1.0f, ctx.sizeMax));
+            int rh = rng.randint(1, std::max(1, rw)); // slightly irregular
+            uint8_t v = randGray(0, 40); // black to dark gray
+            uint8_t a = (uint8_t)rng.randint(178, 255); // 70%-100%
+            // prefer small irregular rectangle
+            fillRectBGRA(buf, ctx.width, ctx.height, px, py, rw, rh, v, v, v, a);
+        }
+
+        // 3) Scratches (thin lines/curves)
+        int scratchCount = rng.randint(0, std::max(1, ctx.density/20 + 2)); // 0..~7
+        for (int i=0; i<scratchCount; ++i) {
+            float x0 = (float)rng.randint(0, ctx.width-1);
+            float y0 = (float)rng.randint(0, ctx.height-1);
+            float len = (float)rng.randint(10, 40);
+            float angle = float(rng.uniform01() * 2.0 * PI);
+            float x1 = x0 + std::cos(angle) * len;
+            float y1 = y0 + std::sin(angle) * len;
+            int thick = rng.randint(1, 2);
+            uint8_t v = randGray(0, 30);
+            uint8_t a = (uint8_t)rng.randint(130, 220);
+            if (rng.uniform01() < 0.5) {
+                // straight line
+                drawLineBGRA(buf, ctx.width, ctx.height, x0 + jx, y0 + jy, x1 + jx, y1 + jy, v, v, v, a, thick);
+            } else {
+                // curved line via a control point near the middle
+                float cxp = (x0 + x1) * 0.5f + (float)rng.randint(-10, 10);
+                float cyp = (y0 + y1) * 0.5f + (float)rng.randint(-10, 10);
+                drawQuadBezierBGRA(buf, ctx.width, ctx.height, x0 + jx, y0 + jy, cxp + jx, cyp + jy, x1 + jx, y1 + jy,
+                                   v, v, v, a, thick, 24);
+            }
+        }
+
+        // 4) Rare large debris: hairs and smudges
+        double rare = rng.uniform01();
+        if (rare < 0.05) {
+            // Hair: long thin curve near edges
+            float side = (rng.uniform01() < 0.5) ? 0.0f : (float)ctx.width;
+            float x0 = side;
+            float y0 = (float)rng.randint(0, ctx.height-1);
+            float x1 = (float)rng.randint(0, ctx.width-1);
+            float y1 = (float)rng.randint(0, ctx.height-1);
+            float cxp = ((x0 + x1) * 0.5f) + (float)rng.randint(-30, 30);
+            float cyp = ((y0 + y1) * 0.5f) + (float)rng.randint(-30, 30);
+            uint8_t v = randGray(0, 25);
+            uint8_t a = (uint8_t)rng.randint(110, 180);
+            drawQuadBezierBGRA(buf, ctx.width, ctx.height, x0 + jx, y0 + jy, cxp + jx, cyp + jy, x1 + jx, y1 + jy,
+                               v, v, v, a, 1, 40);
+        } else if (rare < 0.08) {
+            // Smudge: big faint circle
+            float cxp = (float)rng.randint(0, ctx.width-1) + jx;
+            float cyp = (float)rng.randint(0, ctx.height-1) + jy;
+            float rad = (float)rng.randint(std::max(20, ctx.width/20), std::max(30, ctx.width/10));
+            uint8_t v = randGray(20, 60);
+            uint8_t a = (uint8_t)rng.randint(25, 50); // 10%-20%
+            fillCircleBGRA(buf, ctx.width, ctx.height, cxp, cyp, rad, v, v, v, a);
+        }
+
+        // No internal state to keep for seamless loop
+        (void)ctx;
+    }
+
+private:
+    int m_w{0}, m_h{0};
+    std::vector<uint8_t> m_vignette; // per-pixel alpha for vignette
+    uint32_t m_seedBase{0};
+};
+
+// White Noise: rounded light artifacts, fewer scratches
+class EffectWhiteNoise : public Effect {
+public:
+    void setup(const EffectContext& ctx) override {
+        m_w = ctx.width; m_h = ctx.height;
+        m_seedBase = 99123u;
+    }
+    void drawBGRA(std::vector<uint8_t>& buf, int frame, const EffectContext& ctx) override {
+        int tf = std::max(1, ctx.totalFrames());
+        int f = int(frame * ctx.speed) % tf;
+        RNG rng(m_seedBase + (uint32_t)f);
+
+        // Slight jitter for naturalism
+        int jx = rng.randint(-1, 1);
+        int jy = rng.randint(-1, 1);
+
+        // Rounded dust particles: light gray to white, varying opacity
+        int baseMin = 16, baseMax = 36; // fewer than black-noise
+        int count = std::clamp((ctx.density * (baseMin + baseMax) / 240), baseMin/2, baseMax);
+        float rmin = std::min(ctx.sizeMin, ctx.sizeMax);
+        float rmax = std::max(ctx.sizeMin, ctx.sizeMax);
+        rmin = std::max(1.0f, rmin);
+        rmax = std::max(rmin, rmax);
+        for (int i=0; i<count; ++i) {
+            float cx = (float)rng.randint(0, ctx.width-1) + jx;
+            float cy = (float)rng.randint(0, ctx.height-1) + jy;
+            float rad = rmin + (float)rng.uniform01() * std::max(0.0f, rmax - rmin);
+            uint8_t v = (uint8_t)rng.randint(200, 255); // light
+            uint8_t a = (uint8_t)rng.randint(150, 230);  // 60%..90%
+            fillCircleBGRA(buf, ctx.width, ctx.height, cx, cy, rad, v, v, v, a);
+        }
+
+        // Very few scratches: thinner and lighter
+        int scratches = rng.randint(0, std::max(1, ctx.density/30)); // fewer overall
+        for (int i=0; i<scratches; ++i) {
+            float x0 = (float)rng.randint(0, ctx.width-1);
+            float y0 = (float)rng.randint(0, ctx.height-1);
+            float len = (float)rng.randint(8, 28);
+            float angle = float(rng.uniform01() * 2.0 * PI);
+            float x1 = x0 + std::cos(angle) * len;
+            float y1 = y0 + std::sin(angle) * len;
+            int thick = 1;
+            uint8_t v = (uint8_t)rng.randint(200, 245);
+            uint8_t a = (uint8_t)rng.randint(110, 180);
+            if (rng.uniform01() < 0.35) {
+                float cxp = (x0 + x1) * 0.5f + (float)rng.randint(-8, 8);
+                float cyp = (y0 + y1) * 0.5f + (float)rng.randint(-8, 8);
+                drawQuadBezierBGRA(buf, ctx.width, ctx.height,
+                                   x0 + jx, y0 + jy, cxp + jx, cyp + jy, x1 + jx, y1 + jy,
+                                   v, v, v, a, thick, 20);
+            } else {
+                drawLineBGRA(buf, ctx.width, ctx.height, x0 + jx, y0 + jy, x1 + jx, y1 + jy, v, v, v, a, thick);
+            }
+        }
     }
 private:
-    struct Cell { int nextChange{30}; int phase{0}; uint8_t value{0}; };
-    std::vector<Cell> m_cells;
-    int m_gridSize{8};
-    int m_frame{0};
+    int m_w{0}, m_h{0};
+    uint32_t m_seedBase{0};
 };
 
 class EffectGoldenLights : public Effect {
@@ -298,6 +491,7 @@ void Renderer::SetSizeMax(float px) {
 
 void Renderer::Setup() {
     if (m_effectName == "black-noise") m_effect = std::make_unique<EffectBlackNoise>();
+    else if (m_effectName == "white-noise") m_effect = std::make_unique<EffectWhiteNoise>();
     else if (m_effectName == "golden-lights") m_effect = std::make_unique<EffectGoldenLights>();
     else if (m_effectName == "rain") m_effect = std::make_unique<EffectRain>();
     else if (m_effectName == "snow") m_effect = std::make_unique<EffectSnow>();
